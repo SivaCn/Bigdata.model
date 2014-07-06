@@ -3,7 +3,7 @@
 
 ## ------------ Imports ----------- ##
 import os
-import linked
+from . import chains
 ## ------------ Imports ----------- ##
 
 ## ------------ Constants ----------- ##
@@ -11,21 +11,25 @@ MAX_LINES_IN_FILE_CHUNK = 2
 MAX_LINES_IN_BUFFER = 4  # max number of lines to be kept in buffer
 ## ------------ Constants ----------- ##
 
-class FileOperations(object):
+
+class File_(object):
     """Readd or Write any flat files."""
     def __init__(self, out_file):
         self.buffer_ = []
         self.buffer_now = 0
         self.out_file = out_file
 
-    def read(self, file_):
-        pass
+    def read_headers(self, file_):
+        with open(file_, 'r') as fp:
+            return fp.readline()
 
-    def read_line(self, file_):
+    def read_line_by_line(self, file_):
         fp = open(file_, 'r')
         line = fp.readline()
+        # Skip reading the Headers
+        line = fp.readline()
         while line:
-            if line and line != '\n':
+            if line.strip('\n'):
                 yield line
             line = fp.readline()
 
@@ -37,49 +41,59 @@ class FileOperations(object):
             with open(file_, 'a') as fp:
                 fp.writelines(data)
 
-    def write_buffer(self, file_, data):
-        if data:
-            if self.buffer_now >= MAX_LINES_IN_BUFFER:
-                self.write(self.buffer_)
-                self.buffer_ = []
-                self.buffer_now = 0
-            else:
-                self.buffer_.append(data)
+class Buffers(object):
+    def __init__(self, col_name):
+        self.buff = []
+        self.col_name = col_name
 
+    def __repr__(self):
+        return "Buffers({0})".format(self.col_name)
 
-class MakeData(FileOperations):
-    def __init__(self, in_file):
-        self.input_file = in_file
-        self.out_file_path = r'/home/local/PALYAM/nsivakumar/BIGDATA/engine'
-        self.out_file_templ = "{0}_%04d.csv"# .format(os.path.split(self.input_file)[-1].rstrip('.csv'))
-        self.file_name_suffix = 0
+class CSV_(File_):
+    def __init__(self):
+        self.col_headers = []
+        self.infile = ''
+        self.file_count = 0
+        self.db_path = r'/home/local/PALYAM/nsivakumar/BIGDATA/dbs'
+        self.outfile_temp = "{0}_{1}_%06d.csv".format(os.path.split(self.infile)[-1].rstrip('.csv'), '{1}')
 
-        self.col_names = []
+        self.db_feed_data = {'DATABASE': None}
 
-    def __call__(self):
-        for index, each_line in enumerate(self.read_line(self.input_file)):
-            if index == 0:
-                self.col_names = each_line.split(',')
-                print self.col_names
-                continue
+    def make_db(self, infile):
+        self.infile = infile
 
-            if not index % MAX_LINES_IN_FILE_CHUNK:
-                self.file_name_suffix += 1
+        for header_line in self.read_headers(self.infile):
+            self.col_headers = [ele.strip() for ele in_line.split(',')]
 
-            out_file_dir = os.path.join(self.out_file_path, os.path.split(self.input_file)[-1].rstrip('.csv'))
-            if not os.path.exists(out_file_dir):
-                os.makedirs(out_file_dir)
+        buffers = [Buffers(_col_name) for _col_name in self.col_headers]
 
-            for col_idx, each_col in enumerate(each_line.split(',')):
-                out_file_abs_path = os.path.join(out_file_dir, self.out_file_templ.format(self.col_names[col_idx]) % self.file_name_suffix)
-                self.write(out_file_abs_path, [index, each_col])
+        for _row_id, _lines in enumerate(self.read_line_by_line(self.infile)):
 
-            if index >= 100:
-                break
+            if not _row_id % MAX_LINES_IN_FILE_CHUNK and not len(buffers[0]):
+                ## flush it towards the storage files.
+                self.file_count += 1
+                for buffer_ in buffers:
 
+                    _file_chunk_name = self.write(self.outfile_temp.format(buffer_.col_name) % (self.file_count)
 
-if __name__ == '__main__':
-    """This Bolck is used for Unit Test.
-    """
-    hadoop = MakeData(r'/home/local/PALYAM/nsivakumar/BIGDATA/engine/sample_4_col.csv')
-    hadoop()
+                    if self.write(_file_chunk_name, buffer_.buff):
+                        ## Empty the buffer list after the flush
+                        buffer_.buff = []
+
+                        ## Compute hash for the just generated file.
+                        pass
+
+                        ## add the info of this generated file in to the Linked list as a Node.
+                        #TODO: make sure of the Metadata.
+                        pass
+
+                    else:
+                        raise Exception("Unable to Flush the Buffer: {0}".format(buffer_))
+
+            _split_lines = [ele.strip() for ele in _lines.split(',')]
+
+            if len(_split_lines) != len(buffers):
+                raise Exception("Columns in the CSV file: {0} are not matching".format(self.infile))
+
+            for index, col_data in enumerate(_split_lines):
+                buffers[index].buff.append(col_data)
